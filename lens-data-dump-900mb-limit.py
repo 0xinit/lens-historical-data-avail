@@ -60,3 +60,39 @@ def submit_blob(sess: requests.Session, payload: bytes) -> str:
     r = sess.post(TURBODA_ENDPOINT, data=payload, timeout=30)
     r.raise_for_status()
     return r.json().get("submission_id", "<unknown>")
+
+# ── helpers ──────────────────────────────────────────────────────────────
+def fetch_tx_list(cur) -> None:
+    cur.execute("""
+        SELECT DISTINCT
+               miniblock_number  AS blk,
+               tx_index_in_block AS idx,
+               tx_hash
+        FROM   public.events
+        ORDER  BY blk, idx
+    """)
+    for row in cur:
+        yield row.blk, row.idx, row.tx_hash
+
+def fetch_rows_for_tx(cur, blk, idx, tx_hash):
+    """Yield (table_tag, json_text) for all rows of this transaction."""
+    # events
+    cur.execute(
+        """SELECT row_to_json(t)::text
+             FROM public.events t
+            WHERE miniblock_number = %s
+              AND tx_index_in_block = %s
+         ORDER BY event_index_in_block""",
+        (blk, idx))
+    for (txt,) in cur:
+        yield "events", txt
+
+    # storage_logs
+    cur.execute(
+        """SELECT row_to_json(t)::text
+             FROM public.storage_logs t
+            WHERE tx_hash = %s
+         ORDER BY operation_number""",
+        (tx_hash,))
+    for (txt,) in cur:
+        yield "storage_logs", txt
