@@ -96,3 +96,37 @@ def fetch_rows_for_tx(cur, blk, idx, tx_hash):
         (tx_hash,))
     for (txt,) in cur:
         yield "storage_logs", txt
+
+# ── main ─────────────────────────────────────────────────────────────────
+def main() -> None:
+    conn      = psycopg2.connect(dsn=DB_DSN, cursor_factory=NamedTupleCursor)
+    tx_cur    = conn.cursor()
+    data_cur  = conn.cursor()
+    sess      = make_session()
+
+    buffer, buf_size     = [], 0
+    blobs, bytes_sent    = 0, 0
+    tx_count             = 0
+    t0                   = time.time()
+
+    for blk, idx, tx_hash in fetch_tx_list(tx_cur):
+        if bytes_sent >= MAX_TOTAL_BYTES:
+            log.info("quota hit (%d bytes) – stopping", bytes_sent)
+            break
+
+        # ── collect & possibly split rows for this tx ──────────────────
+        parts, part_buf, part_size, part_num = [], [], 0, 1
+        for tbl, row_json in fetch_rows_for_tx(data_cur, blk, idx, tx_hash):
+            line = f"{tbl}:{row_json}"
+            line_bytes = len(line.encode())
+
+            # flush current part if adding line would exceed MAX_PAYLOAD
+            if part_size + line_bytes > MAX_PAYLOAD and part_buf:
+                label = f"{tbl}-part{part_num}" if part_num > 1 else tbl
+                parts.append((label, "\n".join(part_buf)))
+                part_buf, part_size, part_num = [], 0, part_num + 1
+
+            part_buf.append(line)
+            part_size += line_bytes
+
+        
