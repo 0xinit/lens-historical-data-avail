@@ -129,4 +129,58 @@ def main() -> None:
             part_buf.append(line)
             part_size += line_bytes
 
-        
+        # final piece for this table
+        if part_buf:
+            label = f"{tbl}-part{part_num}" if part_num > 1 else tbl
+            parts.append((label, "\n".join(part_buf)))
+
+        # ── build tx blob from parts ───────────────────────────────────
+        tx_blob = "\n".join(f"{label}:\n{payload}" for label, payload in parts)
+        tx_bytes = len(tx_blob.encode())
+
+        # impossible edge-case: single row > 1 MB
+        if tx_bytes > MAX_PAYLOAD:
+            log.warning("tx blk=%d idx=%d is %d bytes – skipping",
+                        blk, idx, tx_bytes)
+            continue
+
+        # flush buffer if adding this tx would exceed 1 MB
+        if buf_size + tx_bytes > MAX_PAYLOAD and buffer:
+            blob_bytes = "\n".join(buffer).encode()
+            if bytes_sent + len(blob_bytes) > MAX_TOTAL_BYTES:
+                log.info("next blob would exceed quota – stopping")
+                break
+            sid = submit_blob(sess, blob_bytes)
+            blobs += 1
+            bytes_sent += len(blob_bytes)
+            log.info("blob %-5d %7d bytes (total %d MB) – id=%s",
+                     blobs, len(blob_bytes), bytes_sent // 1_000_000, sid)
+            buffer, buf_size = [], 0
+
+        buffer.append(tx_blob)
+        buf_size += tx_bytes
+        tx_count += 1
+
+        if tx_count % 1_000 == 0:
+            rate = tx_count / (time.time() - t0)
+            log.info("progress: %d tx (latest blk=%d idx=%d, %.1f tx/s)",
+                     tx_count, blk, idx, rate)
+
+    # flush remainder
+    if buffer and bytes_sent < MAX_TOTAL_BYTES:
+        blob_bytes = "\n".join(buffer).encode()
+        if bytes_sent + len(blob_bytes) <= MAX_TOTAL_BYTES:
+            sid = submit_blob(sess, blob_bytes)
+            blobs += 1
+            bytes_sent += len(blob_bytes)
+            log.info("blob %-5d %7d bytes (total %d MB) – id=%s",
+                     blobs, len(blob_bytes), bytes_sent // 1_000_000, sid)
+
+    log.info("DONE – %d blobs, %d tx, %.1f s elapsed",
+             blobs, tx_count, time.time() - t0)
+
+    tx_cur.close(); data_cur.close(); conn.close()
+
+# ── entrypoint ───────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    main()
