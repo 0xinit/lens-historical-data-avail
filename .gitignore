@@ -3,3 +3,5 @@
 zksync*
 
 lens-data/*
+
+build/*
