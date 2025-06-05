@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sequential_poster.py  –  posts chunks in manifest order,
+sequential_poster – posts chunks in manifest order,
 writes results to build/uploaded.ndjson (append-only).
 """
 
